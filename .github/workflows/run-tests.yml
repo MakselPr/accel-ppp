@@ -16,6 +16,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - distro: Ubuntu-24.04
+            image: https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+            untar: false
+            format: qcow2
+
           - distro: Ubuntu-22.04
             image: https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
             untar: false
@@ -26,13 +31,13 @@ jobs:
             untar: false
             format: qcow2
 
-          - distro: Ubuntu-18.04
-            image: https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img
-            untar: false
-            format: qcow2
+          - distro: Debian13
+            image: https://cloud.debian.org/images/cloud/trixie/daily/latest/debian-13-generic-amd64-daily.tar.xz
+            untar: true
+            format: raw
 
           - distro: Debian12
-            image: https://cloud.debian.org/images/cloud/bookworm/daily/latest/debian-12-generic-amd64-daily.tar.xz
+            image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.tar.xz
             untar: true
             format: raw
 
@@ -118,8 +123,9 @@ jobs:
           ssh -i ssh-key -p2222 user@localhost "sudo apt -y install
           git build-essential cmake gcc linux-headers-\`uname -r\` 
           libpcre3-dev libssl-dev liblua5.1-0-dev kmod python3-pip 
+          libxml2-dev libxslt1-dev zlib1g-dev 
           iproute2 ppp pppoe isc-dhcp-client timelimit && 
-          sudo pip3 install pytest pytest-dependency gcovr"
+          (sudo pip3 install pytest pytest-dependency gcovr || sudo pip3 install --break-system-packages pytest pytest-dependency gcovr)"
       - name: Copy source code to target OS
         run: |
           tar -Jcf accel-ppp.tar.xz accel-ppp
@@ -171,7 +177,8 @@ jobs:
 
       - name: Run tests (all)
         timeout-minutes: 5
-        if: ${{ always() }}
+        # vlan-mon tests fail on Debian10 due to Debian10 bug so don't run all tests on deb10
+        if: ${{ matrix.distro != 'Debian10' }}
         run: >
           ssh -i ssh-key -p2222 user@localhost "cd accel-ppp/tests && 
           sudo python3 -m pytest -Wall -v"

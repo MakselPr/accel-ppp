@@ -106,7 +106,7 @@ enum {CSID_MAC, CSID_IFNAME, CSID_IFNAME_MAC};
 static int conf_called_sid;
 static int conf_cookie_timeout;
 static const char *conf_vlan_name;
-static int conf_vlan_timeout;
+static int conf_vlan_timeout = 60;
 
 static mempool_t conn_pool;
 static mempool_t pado_pool;
@@ -201,6 +201,7 @@ static void disconnect(struct pppoe_conn_t *conn)
 	sid_map[conn->sid/(8*sizeof(long))] |= 1 << (conn->sid % (8*sizeof(long)));
 	pthread_mutex_unlock(&sid_lock);
 
+	_free(conn->ctrl.service_name);
 	_free(conn->ctrl.calling_station_id);
 	_free(conn->ctrl.called_station_id);
 	_free(conn->service_name);
@@ -388,6 +389,12 @@ static struct pppoe_conn_t *allocate_channel(struct pppoe_serv_t *serv, const ui
 	}
 
 	conn->ctrl.calling_station_id = _malloc(IFNAMSIZ + 19);
+
+	conn->ctrl.service_name = _malloc(256);
+	memset(conn->ctrl.service_name, 0x0, 256);
+
+	if (service_name && ntohs(service_name->tag_len) < 256 && ntohs(service_name->tag_len) > 0)
+		memcpy(conn->ctrl.service_name, service_name->tag_data, ntohs(service_name->tag_len));
 
 	if (conf_ifname_in_sid == 1 || conf_ifname_in_sid == 3)
 		if (conf_sid_uppercase)
@@ -1430,7 +1437,7 @@ static void __pppoe_server_start(const char *ifname, const char *opt, void *cli,
 	struct pppoe_serv_t *serv;
 	struct ifreq ifr;
 	int padi_limit = conf_padi_limit;
-	struct ap_net *net = def_net;
+	net = def_net;
 
 	if (parse_server(opt, &padi_limit, &net)) {
 		if (cli)
@@ -1603,7 +1610,7 @@ void pppoe_server_free(struct pppoe_serv_t *serv)
 	if (serv->timer.tpd)
 		triton_timer_del(&serv->timer);
 
-	if (serv->vlan_mon) {
+	if (serv->vlan_mon && conf_vlan_timeout) {
 		log_info2("pppoe: remove vlan %s\n", serv->ifname);
 		iplink_vlan_del(serv->ifindex);
 		vlan_mon_add_vid(serv->parent_ifindex, ETH_P_PPP_DISC, serv->vid);
@@ -2077,10 +2084,8 @@ static void load_config(void)
 		conf_vlan_name = "%I.%N";
 
 	opt = conf_get_opt("pppoe", "vlan-timeout");
-	if (opt && atoi(opt) > 0)
+	if (opt && atoi(opt) >= 0)
 		conf_vlan_timeout = atoi(opt);
-	else
-		conf_vlan_timeout = 60;
 
 	load_vlan_mon(s);
 }
