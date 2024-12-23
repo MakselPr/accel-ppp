@@ -1,4 +1,4 @@
-name: Run tests (big-endian)
+name: Run tests (x86_32)
 
 on:
   workflow_dispatch:
@@ -8,11 +8,14 @@ on:
       - master
 
 jobs:
-
-  Test-in-Alpine-s390x:
+  Test-in-Alpine-x86-32:
     #if: ${{ false }} # disable for now
     runs-on: ubuntu-24.04
-    name: Test in Qemu (s390x Alpine)
+    name: Test in Qemu (x86_32 Alpine)
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [v3.20]
 
     steps:
       - name: Check out repository code
@@ -24,23 +27,13 @@ jobs:
         run: >
           sudo apt update && 
           NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true
-          sudo -E apt -y install wget openssh-client screen
-          libglib2.0-dev libfdt-dev libpixman-1-dev zlib1g-dev libslirp-dev ninja-build
-      - name: Build Qemu 9.1.2
-        # Qemu 8.2 from Ubuntu24.04 has critical s390x-related bugs so Qemu9 is required
-        run: |
-          wget -nv https://github.com/qemu/qemu/archive/refs/tags/v9.1.2.tar.gz
-          tar -xf v9.1.2.tar.gz
-          cd qemu-9.1.2
-          ./configure --target-list=s390x-softmmu --enable-slirp
-          make -j
-          sudo make install
+          sudo -E apt -y install qemu-system-x86 qemu-utils wget openssh-client screen
       - name: Prepare qemu files
         run: |
           ssh-keygen -t ed25519 -q -N "" -f ssh-key
           qemu-img create -f raw disk.raw 5G
-          wget -nv https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/s390x/netboot/vmlinuz-lts
-          wget -nv https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/s390x/netboot/initramfs-lts
+          wget -nv https://dl-cdn.alpinelinux.org/alpine/${{ matrix.distro }}/releases/x86/netboot/vmlinuz-lts
+          wget -nv https://dl-cdn.alpinelinux.org/alpine/${{ matrix.distro }}/releases/x86/netboot/initramfs-lts
       - name: Run http server for ssh-key
         run: |
           sudo ip addr add 192.0.2.1/32 dev lo # stable ip for http server 
@@ -48,14 +41,14 @@ jobs:
       - name: Run target OS first time (for setup actions)
         run: >
           sudo screen -dmS qemu
-          qemu-system-s390x -M s390-ccw-virtio
-          -m 4096 -smp 2 -nographic
+          qemu-system-i386 -accel kvm -M q35
+          -m 2048 -smp 2 -nographic
           -net nic -net user,hostfwd=tcp::2222-:22
           -drive format=raw,file=disk.raw
           -kernel vmlinuz-lts
           -initrd initramfs-lts
-          -append "ip=dhcp alpine_repo=https://dl-cdn.alpinelinux.org/alpine/v3.20/main
-          modloop=https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/s390x/netboot/modloop-lts
+          -append "ip=dhcp alpine_repo=https://dl-cdn.alpinelinux.org/alpine/${{ matrix.distro }}/main
+          modloop=https://dl-cdn.alpinelinux.org/alpine/${{ matrix.distro }}/releases/x86/netboot/modloop-lts
           ssh_key=http://192.0.2.1:8000/ssh-key.pub"
       - name: Check that target OS is running
         run: |
@@ -75,9 +68,9 @@ jobs:
           ssh -i ssh-key -p2222 root@localhost "setup-alpine -c setup_alpine_conf &&
           sed -i '/^ROOTSSHKEY\|^DISKOPTS\|^APKREPOSOPTS=/d' setup_alpine_conf &&
           echo '' >> setup_alpine_conf &&
-          echo 'DISKOPTS=\"-m sys /dev/vda\"' >> setup_alpine_conf &&
+          echo 'DISKOPTS=\"-m sys /dev/sda\"' >> setup_alpine_conf &&
           echo 'ROOTSSHKEY=\"http://192.0.2.1:8000/ssh-key.pub\"' >> setup_alpine_conf &&
-          echo 'APKREPOSOPTS=\"https://dl-cdn.alpinelinux.org/alpine/v3.20/main\"' >> setup_alpine_conf &&
+          echo 'APKREPOSOPTS=\"https://dl-cdn.alpinelinux.org/alpine/${{ matrix.distro }}/main\"' >> setup_alpine_conf &&
           cat setup_alpine_conf &&
           yes | setup-alpine -e -f setup_alpine_conf"
       - name: Poweroff the VM
@@ -92,8 +85,8 @@ jobs:
       - name: Run target OS
         run: >
           sudo screen -dmS qemu
-          qemu-system-s390x -M s390-ccw-virtio
-          -m 4096 -smp 2 -nographic
+          qemu-system-i386 -accel kvm -M q35
+          -m 2048 -smp 2 -nographic
           -net nic -net user,hostfwd=tcp::2222-:22
           -drive format=raw,file=disk.raw
       - name: Check that target OS is running
